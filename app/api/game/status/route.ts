@@ -3,48 +3,60 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   try {
+    console.log("\n=========== STATUS ENDPOINT ==========");
+
     const searchParams = request.nextUrl.searchParams;
     const roomId = searchParams.get("roomId");
     const playerId = searchParams.get("playerId");
 
+    console.log("Incoming roomId:", roomId);
+    console.log("Incoming playerId:", playerId);
+
     if (!roomId || !playerId) {
+      console.log("❌ Missing parameters");
       return NextResponse.json(
         { error: "Missing roomId or playerId" },
         { status: 400 }
       );
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
 
-    // Get all game states for this room
-    const { data: gameStates, error } = await supabase
-      .from("game_states")
+    // Fetch all question rows for this room
+    const { data: questionRows, error } = await supabase
+      .from("questions")
       .select("*")
       .eq("room_id", roomId);
 
+    console.log("Raw DB response:");
+    console.log("Error:", error);
+    console.log("Data:", questionRows);
+
     if (error) {
-      console.error("Supabase error:", error);
+      console.error("❌ Supabase error:", error);
       return NextResponse.json(
         { error: "Failed to fetch game state" },
         { status: 500 }
       );
     }
 
-    // Check if both players are ready
-    const playersReady = gameStates?.filter((state) => state.ready) || [];
-    const totalPlayers = new Set(gameStates?.map((state) => state.player_id) || []).size;
+    const readyCount = questionRows?.length || 0;
 
-    // If there are at least 2 players and both are ready
-    const partnerReady = playersReady.length === 2 && totalPlayers === 2;
+    // Since 1 row per player per room
+    const partnerReady = readyCount === 2;
+
+    console.log("Ready Count:", readyCount);
+    console.log("Partner Ready:", partnerReady);
+    console.log("=========== END STATUS ==========\n");
 
     return NextResponse.json({
       partnerReady,
-      readyCount: playersReady.length,
-      totalPlayers,
-      gameStates,
+      readyCount,
+      questionRows,
     });
+
   } catch (error) {
-    console.error("Error in status endpoint:", error);
+    console.error("❌ Status endpoint crash:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
