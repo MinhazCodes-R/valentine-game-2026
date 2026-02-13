@@ -1,47 +1,59 @@
-import { DashboardClient } from "@/components/dashboard-client";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 
-export default async function DashboardPage() {
-  const fakeUser = {
-    id: "demo-user",
-    email: "demo@example.com",
-  } as any;
+interface RoomPageProps {
+  params: Promise<{ id: string }>;
+}
 
-  const fakeProfile = {
-    id: "demo-user",
-    display_name: "Demo User",
-  };
+export default async function RoomPage({ params }: RoomPageProps) {
+  const { id } = await params;
 
-  const fakeRooms = [
-    {
-      id: "room-1",
-      name: "Demo Love Game",
-      creator_id: "demo-user",
-      partner_id: null,
-      status: "waiting",
-      created_at: new Date().toISOString(),
-    },
-  ];
+  const supabase = await createClient();
 
-  const fakeInvites = [
-    {
-      id: "invite-1",
-      room_id: "room-1",
-      status: "pending",
-      rooms: {
-        id: "room-1",
-        name: "Demo Love Game",
-        status: "waiting",
-        creator_id: "demo-user",
-      },
-    },
-  ];
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return (
-    <DashboardClient
-      user={fakeUser}
-      profile={fakeProfile}
-      myRooms={fakeRooms}
-      pendingInvites={fakeInvites}
-    />
-  );
+  if (!user) {
+    redirect("/auth/login");
+  }
+
+  // 1️⃣ Fetch room
+  const { data: room } = await supabase
+    .from("rooms")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (!room) {
+    redirect("/dashboard");
+  }
+
+  // 2️⃣ Ensure user belongs to room
+  const isMember =
+    room.creator_id === user.id ||
+    room.partner_id === user.id;
+
+  if (!isMember) {
+    redirect("/dashboard");
+  }
+
+  // 3️⃣ Check if user has created questions
+  const { data: questions } = await supabase
+    .from("questions")
+    .select("id")
+    .eq("room_id", room.id)
+    .eq("author_id", user.id)
+    .limit(1);
+
+  const hasCreatedQuestions = questions && questions.length > 0;
+
+  // 4️⃣ Redirect based on that
+  if (!hasCreatedQuestions) {
+    // User hasn't created their questions yet
+    redirect(`/mock-pick?roomId=${room.id}&playerId=${user.id}`);
+  } else {
+    // User already created questions
+    redirect(`/mock-guess?roomId=${room.id}&playerId=${user.id}`);
+  }
 }

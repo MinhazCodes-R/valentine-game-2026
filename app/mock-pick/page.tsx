@@ -102,28 +102,39 @@ export default function RoomDemoPage() {
     if (questions.length !== QUESTION_COUNT) return;
 
     setIsLoading(true);
+
     try {
-      const response = await fetch("/api/game/ready", {
+      const formattedQuestions = questions.map((q) => ({
+        question: q.question,
+        choice1: q.correct,
+        choice2: q.wrong1,
+        choice3: q.wrong2,
+        choice4: q.wrong3,
+        correct_choice: "choice1", // since correct is first
+      }));
+
+      const response = await fetch("/api/questions/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           roomId,
-          playerId,
-          questions,
+          questions: formattedQuestions,
         }),
       });
 
-      if (response.ok) {
-        setIsFinished(true);
-      } else {
-        console.error("Failed to mark player as ready");
+      if (!response.ok) {
+        console.error("Failed to save questions");
+        return;
       }
+
+      setIsFinished(true);
     } catch (error) {
-      console.error("Error marking player as ready:", error);
+      console.error("Error saving questions:", error);
     } finally {
       setIsLoading(false);
     }
   };
+
 
   // --------------------------
   // SETUP PHASE
