@@ -127,23 +127,25 @@ export function DashboardClient({
 
   async function handleAcceptInvite(invite: Invite) {
     setAcceptingInvite(invite.id);
-    const supabase = createClient();
 
-    // Update invite status
-    await supabase
-      .from("invites")
-      .update({ status: "accepted" })
-      .eq("id", invite.id);
+    const res = await fetch("/api/invites/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room_id: invite.room_id }),
+    });
 
-    // Update room with partner
-    await supabase
-      .from("rooms")
-      .update({ partner_id: user.id })
-      .eq("id", invite.room_id);
+    const data = await res.json();
 
     setAcceptingInvite(null);
-    router.push(`/room/${invite.room_id}`);
+
+    if (!res.ok) {
+      alert(data.error || "Something went wrong");
+      return;
+    }
+
+    router.push(`/room/${data.room_id}`);
   }
+
 
   async function handleSignOut() {
     const supabase = createClient();
