@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
       .from("questions")
       .select("*")
       .eq("room_id", roomId)
-      .eq("user_id", partnerId);
+      .eq("author_id", partnerId);
 
     if (questionsError) {
       return NextResponse.json(
