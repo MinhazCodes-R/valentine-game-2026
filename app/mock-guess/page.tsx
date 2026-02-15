@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Heart, Trophy, Loader2 } from "lucide-react";
 
 const QUESTION_COUNT = 5;
 
 type Question = {
+  id: string;
   question: string;
   correct: string;
   wrong1: string;
@@ -21,62 +23,44 @@ type Guessed = {
   partnerAnswer: string;
 };
 
-// Fake partner questions for demo
-const FAKE_PARTNER_QUESTIONS: Question[] = [
-  {
-    question: "What's my favorite color?",
-    correct: "Blue",
-    wrong1: "Red",
-    wrong2: "Green",
-    wrong3: "Yellow",
-  },
-  {
-    question: "What's my dream vacation destination?",
-    correct: "Paris",
-    wrong1: "Tokyo",
-    wrong2: "New York",
-    wrong3: "Sydney",
-  },
-  {
-    question: "What's my favorite food?",
-    correct: "Pizza",
-    wrong1: "Sushi",
-    wrong2: "Tacos",
-    wrong3: "Pasta",
-  },
-  {
-    question: "What's the name of my favorite pet?",
-    correct: "Luna",
-    wrong1: "Max",
-    wrong2: "Charlie",
-    wrong3: "Bella",
-  },
-  {
-    question: "What's my favorite hobby?",
-    correct: "Reading",
-    wrong1: "Gaming",
-    wrong2: "Painting",
-    wrong3: "Hiking",
-  },
-];
-
 export default function MockGuessPage() {
+  const searchParams = useSearchParams();
+  const roomId = searchParams?.get("roomId") || "";
+  const visitorId = searchParams?.get("visitorId") || "";
+
   const [phase, setPhase] = useState<"loading" | "guessing" | "finished">("loading");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [guessed, setGuessed] = useState<Guessed[]>([]);
-  const [isStarting, setIsStarting] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  // Fetch partner's questions on mount
   useEffect(() => {
-    // Simulate loading partner's questions
-    const timer = setTimeout(() => {
-      setQuestions(FAKE_PARTNER_QUESTIONS);
-      setPhase("guessing");
-      setIsStarting(false);
-    }, 2000);
+    const fetchPartnerQuestions = async () => {
+      try {
+        const response = await fetch(
+          `/api/game/questions?roomId=${roomId}&visitorId=${visitorId}`
+        );
 
-    return () => clearTimeout(timer);
-  }, []);
+        if (!response.ok) {
+          console.error("Failed to fetch questions");
+          return;
+        }
+
+        const data = await response.json();
+        setQuestions(data.questions);
+        setPhase("guessing");
+      } catch (error) {
+        console.error("Error fetching partner questions:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (roomId && visitorId) {
+      fetchPartnerQuestions();
+    }
+  }, [roomId, visitorId]);
 
   // Auto scroll when new question appears
   useEffect(() => {
@@ -87,7 +71,7 @@ export default function MockGuessPage() {
   // LOADING PHASE
   // --------------------------
 
-  if (phase === "loading") {
+  if (phase === "loading" || isLoading) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-background px-6">
         <div className="text-center space-y-6 animate-in fade-in duration-700">
@@ -113,7 +97,6 @@ export default function MockGuessPage() {
     const currentQ = questions[currentIndex];
 
     const handleGuess = (option: string) => {
-      // For demo, assume the correct answer is what the player selected
       const isCorrect = option === currentQ.correct;
 
       const newGuessed = [
@@ -168,17 +151,11 @@ export default function MockGuessPage() {
                   Their Answer: {item.partnerAnswer}
                 </p>
               )}
-
-              {item.correct && (
-                <p className="text-sm text-primary font-medium">
-                  ✓ You got it right!
-                </p>
-              )}
             </div>
           ))}
 
           {/* Current Question */}
-          {currentIndex < QUESTION_COUNT && (
+          {currentIndex < QUESTION_COUNT && currentQ && (
             <div className="rounded-xl border-2 border-primary bg-card p-6 space-y-6 shadow-md animate-in fade-in slide-in-from-bottom-6 duration-500">
               <p className="text-muted-foreground text-sm">
                 Question {currentIndex + 1}
