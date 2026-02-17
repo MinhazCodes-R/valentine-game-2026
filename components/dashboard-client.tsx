@@ -1,20 +1,22 @@
 "use client";
 
-import React from "react"
-
-import { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -31,6 +33,8 @@ import {
   Users,
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+
+const POLL_INTERVAL = 3000;
 
 interface Profile {
   id: string;
@@ -55,7 +59,6 @@ interface Invite {
     name: string;
     status: string;
     creator_id: string;
-    profiles: Profile;
   };
 }
 
@@ -69,83 +72,129 @@ interface DashboardClientProps {
 export function DashboardClient({
   user,
   profile,
-  myRooms,
-  pendingInvites,
+  myRooms: initialRooms,
+  pendingInvites: initialInvites,
 }: DashboardClientProps) {
+  const router = useRouter();
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [myRooms, setMyRooms] = useState(initialRooms || []);
+  const [pendingInvites, setPendingInvites] = useState(initialInvites || []);
+
   const [isCreating, setIsCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [partnerEmail, setPartnerEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null);
-  const router = useRouter();
+
+  // -------------------------
+  // POLLING
+  // -------------------------
+
+  useEffect(() => {
+    async function pollDashboard() {
+      try {
+        const res = await fetch("/api/dashboard/poll");
+
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        setMyRooms(data.rooms || []);
+        setPendingInvites(data.invites || []);
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }
+
+    pollDashboard();
+    intervalRef.current = setInterval(pollDashboard, POLL_INTERVAL);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [user.id, user.email]);
+
+  // -------------------------
+  // CREATE ROOM + INVITE
+  // -------------------------
 
   async function handleCreateRoom(e: React.FormEvent) {
     e.preventDefault();
+
+    if (!partnerEmail) {
+      setError("Partner email is required");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
-    const supabase = createClient();
+    try {
+      const res = await fetch("/api/rooms/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newRoomName || "Our Game",
+          creator_id: user.id,
+          partner_email: partnerEmail.toLowerCase(),
+        }),
+      });
 
-    // Create the room
-    const { data: room, error: roomError } = await supabase
-      .from("rooms")
-      .insert({
-        name: newRoomName || "Our Game",
-        creator_id: user.id,
-        status: "waiting",
-      })
-      .select()
-      .single();
+      const data = await res.json();
 
-    if (roomError) {
-      setError(roomError.message);
+      if (!res.ok) {
+        setError(data.error || "Failed to create room");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // reset UI
+      setIsCreating(false);
+      setNewRoomName("");
+      setPartnerEmail("");
       setIsSubmitting(false);
-      return;
-    }
-
-    // Create the invite
-    const { error: inviteError } = await supabase.from("invites").insert({
-      room_id: room.id,
-      inviter_id: user.id,
-      invitee_email: partnerEmail,
-      status: "pending",
-    });
-
-    if (inviteError) {
-      setError(inviteError.message);
+    } catch (err) {
+      console.error(err);
+      setError("Unexpected error occurred");
       setIsSubmitting(false);
-      return;
     }
-
-    setIsCreating(false);
-    setNewRoomName("");
-    setPartnerEmail("");
-    setIsSubmitting(false);
-    router.refresh();
   }
+
+  // -------------------------
+  // ACCEPT INVITE
+  // -------------------------
 
   async function handleAcceptInvite(invite: Invite) {
     setAcceptingInvite(invite.id);
 
-    const res = await fetch("/api/invites/accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room_id: invite.room_id }),
-    });
+    try {
+      const res = await fetch("/api/invites/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room_id: invite.room_id }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
+      setAcceptingInvite(null);
 
-    setAcceptingInvite(null);
+      if (!res.ok) {
+        alert(data.error || "Something went wrong");
+        return;
+      }
 
-    if (!res.ok) {
-      alert(data.error || "Something went wrong");
-      return;
+      router.push(`/room/${data.room_id}`);
+    } catch (err) {
+      console.error(err);
+      setAcceptingInvite(null);
     }
-
-    router.push(`/room/${data.room_id}`);
   }
 
+  // -------------------------
+  // SIGN OUT
+  // -------------------------
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -189,7 +238,7 @@ export function DashboardClient({
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
             <Heart className="h-6 w-6 text-primary" />
-            <span className="font-semibold text-foreground">Know Your Partner</span>
+            <span className="font-semibold">Know Your Partner</span>
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground">
@@ -203,31 +252,75 @@ export function DashboardClient({
       </header>
 
       <div className="mx-auto max-w-5xl px-6 py-8">
-        {/* Welcome Section */}
+        {/* Create Game */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">
-            Welcome back, {profile?.display_name || "there"}!
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Create a new game or continue playing with your partner
-          </p>
+          <Dialog open={isCreating} onOpenChange={setIsCreating}>
+            <DialogTrigger asChild>
+              <Button size="lg" className="gap-2">
+                <Plus className="h-5 w-5" />
+                Create New Game
+              </Button>
+            </DialogTrigger>
+
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create a New Game</DialogTitle>
+              </DialogHeader>
+
+              <form onSubmit={handleCreateRoom} className="space-y-4">
+                {error && (
+                  <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                    {error}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Game Name (optional)</Label>
+                  <Input
+                    value={newRoomName}
+                    onChange={(e) => setNewRoomName(e.target.value)}
+                    placeholder="Our Love Quiz"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Partner's Email</Label>
+                  <Input
+                    type="email"
+                    value={partnerEmail}
+                    onChange={(e) => setPartnerEmail(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create & Send Invite"
+                  )}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* Pending Invites */}
         {pendingInvites.length > 0 && (
-          <div className="mb-8">
-            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-foreground">
+          <>
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold">
               <Mail className="h-5 w-5 text-primary" />
               Pending Invites
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+
+            <div className="grid gap-4 sm:grid-cols-2 mb-8">
               {pendingInvites.map((invite) => (
-                <Card key={invite.id} className="border-primary/20 bg-primary/5">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">{invite.rooms.name}</CardTitle>
-                    <CardDescription>
-                      Invited by {invite.rooms.profiles?.display_name || "Someone"}
-                    </CardDescription>
+                <Card key={invite.id}>
+                  <CardHeader>
+                    <CardTitle>{invite.rooms.name}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <Button
@@ -251,107 +344,34 @@ export function DashboardClient({
                 </Card>
               ))}
             </div>
-          </div>
+          </>
         )}
 
-        {/* Create Game Button */}
-        <div className="mb-8">
-          <Dialog open={isCreating} onOpenChange={setIsCreating}>
-            <DialogTrigger asChild>
-              <Button size="lg" className="gap-2">
-                <Plus className="h-5 w-5" />
-                Create New Game
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create a New Game</DialogTitle>
-                <DialogDescription>
-                  Set up a game room and invite your partner to play
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateRoom} className="space-y-4">
-                {error && (
-                  <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                    {error}
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="roomName">Game Name (optional)</Label>
-                  <Input
-                    id="roomName"
-                    placeholder="Our Love Quiz"
-                    value={newRoomName}
-                    onChange={(e) => setNewRoomName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="partnerEmail">{"Partner's Email"}</Label>
-                  <Input
-                    id="partnerEmail"
-                    type="email"
-                    placeholder="partner@example.com"
-                    value={partnerEmail}
-                    onChange={(e) => setPartnerEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={isSubmitting}>
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    "Create & Send Invite"
-                  )}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
-
         {/* My Games */}
-        <div>
-          <h2 className="mb-4 text-xl font-semibold text-foreground">My Games</h2>
-          {myRooms.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <Heart className="mb-4 h-12 w-12 text-muted-foreground/50" />
-                <h3 className="text-lg font-medium text-foreground">No games yet</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Create your first game and invite your partner to play!
-                </p>
+        <h2 className="mb-4 text-xl font-semibold">My Games</h2>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {myRooms.map((room) => (
+            <Card key={room.id}>
+              <CardHeader>
+                <div className="flex justify-between">
+                  <CardTitle>{room.name}</CardTitle>
+                  {getRoomStatusBadge(room.status)}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={`/room/${room.id}`}>
+                    {room.status === "waiting"
+                      ? "Continue Setup"
+                      : room.status === "playing"
+                      ? "Continue Playing"
+                      : "View Results"}
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {myRooms.map((room) => (
-                <Card key={room.id} className="transition-shadow hover:shadow-md">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between">
-                      <CardTitle className="text-lg">{room.name}</CardTitle>
-                      {getRoomStatusBadge(room.status)}
-                    </div>
-                    <CardDescription>
-                      Created {new Date(room.created_at).toLocaleDateString()}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Button asChild variant="outline" className="w-full bg-transparent">
-                      <Link href={`/room/${room.id}`}>
-                        {room.status === "waiting"
-                          ? "Continue Setup"
-                          : room.status === "playing"
-                            ? "Continue Playing"
-                            : "View Results"}
-                      </Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+          ))}
         </div>
       </div>
     </main>

@@ -18,6 +18,7 @@ type Guessed = {
   question: Question;
   selected: string;
   correct: boolean;
+  correctAnswer: string;
 };
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -36,9 +37,7 @@ export default function MockGuessPage() {
   const roomId = searchParams?.get("roomId");
   const visitorId = searchParams?.get("visitorId");
 
-  const [phase, setPhase] = useState<"loading" | "guessing" | "finished">(
-    "loading"
-  );
+  const [phase, setPhase] = useState<"loading" | "guessing" | "finished">("loading");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [guessed, setGuessed] = useState<Guessed[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,7 +66,6 @@ export default function MockGuessPage() {
         }
 
         const data = await res.json();
-        console.log("Raw API response:", data);
 
         if (!data?.questions?.length) {
           console.error("No questions found");
@@ -84,19 +82,12 @@ export default function MockGuessPage() {
           row.question5,
         ].filter(Boolean);
 
-        const formatted: Question[] = blocks.map(
-          (q: any, index: number) => ({
-            id: `${row.id}-${index}`,
-            question: q.question,
-            choices: [
-              q.choice1,
-              q.choice2,
-              q.choice3,
-              q.choice4,
-            ],
-            correctChoiceKey: q.correct_choice,
-          })
-        );
+        const formatted: Question[] = blocks.map((q: any, index: number) => ({
+          id: `${row.id}-${index}`,
+          question: q.question,
+          choices: [q.choice1, q.choice2, q.choice3, q.choice4],
+          correctChoiceKey: q.correct_choice,
+        }));
 
         setQuestions(formatted);
         setPhase("guessing");
@@ -110,7 +101,7 @@ export default function MockGuessPage() {
     fetchQuestions();
   }, [roomId, visitorId]);
 
-  // Auto scroll when answer selected
+  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [guessed]);
@@ -136,7 +127,6 @@ export default function MockGuessPage() {
         : 3;
 
     const correctAnswer = currentQ.choices[correctIndex];
-
     const isCorrect = option === correctAnswer;
 
     const newGuessed = [
@@ -145,6 +135,7 @@ export default function MockGuessPage() {
         question: currentQ,
         selected: option,
         correct: isCorrect,
+        correctAnswer,
       },
     ];
 
@@ -170,9 +161,7 @@ export default function MockGuessPage() {
   if (!questions.length) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground">
-          No questions available.
-        </p>
+        <p className="text-muted-foreground">No questions available.</p>
       </main>
     );
   }
@@ -190,33 +179,21 @@ export default function MockGuessPage() {
             Guess Your Partner's Answers
           </h1>
 
-          {/* Previous answers */}
           {guessed.map((item, i) => (
             <div
               key={`${item.question.id}-${i}`}
               className="rounded-xl border bg-card p-6 space-y-3 shadow-sm"
             >
-              <h2 className="font-semibold">
-                {item.question.question}
-              </h2>
-              <p
-                className={
-                  item.correct
-                    ? "text-primary"
-                    : "text-destructive"
-                }
-              >
+              <h2 className="font-semibold">{item.question.question}</h2>
+              <p className={item.correct ? "text-primary" : "text-destructive"}>
                 Your Guess: {item.selected}
               </p>
             </div>
           ))}
 
-          {/* Current question */}
           {currentIndex < QUESTION_COUNT && currentQ && (
             <div className="rounded-xl border-2 border-primary bg-card p-6 space-y-6 shadow-md">
-              <h2 className="text-xl font-semibold">
-                {currentQ.question}
-              </h2>
+              <h2 className="text-xl font-semibold">{currentQ.question}</h2>
 
               <div className="space-y-3">
                 {shuffledOptions.map((opt, idx) => (
@@ -246,15 +223,41 @@ export default function MockGuessPage() {
   const score = guessed.filter((g) => g.correct).length;
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center space-y-6">
+    <main className="min-h-screen bg-background px-6 py-16">
+      <div className="mx-auto max-w-xl space-y-6 text-center">
         <Trophy className="mx-auto h-12 w-12 text-primary" />
-        <h1 className="text-3xl font-bold">
-          Finished!
-        </h1>
-        <p>
+        <h1 className="text-3xl font-bold">Finished!</h1>
+        <p className="text-lg">
           You scored {score}/{QUESTION_COUNT}
         </p>
+
+        <div className="space-y-4 text-left mt-6">
+          {guessed.map((item, i) => (
+            <div
+              key={`${item.question.id}-${i}`}
+              className="rounded-xl border p-4"
+            >
+              <p className="font-semibold">{item.question.question}</p>
+
+              <p className={item.correct ? "text-primary" : "text-destructive"}>
+                Your Answer: {item.selected}
+              </p>
+
+              {!item.correct && (
+                <p className="text-muted-foreground text-sm">
+                  Correct Answer: {item.correctAnswer}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <Button
+          className="w-full mt-6"
+          onClick={() => router.push("/dashboard")}
+        >
+          Back to Dashboard
+        </Button>
       </div>
     </main>
   );
